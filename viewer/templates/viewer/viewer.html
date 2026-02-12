@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Visor SQLite</title>
+  <style>
+    body{font-family:system-ui,Arial;margin:0;background:#f6f6f6}
+    header{padding:14px 16px;background:#fff;border-bottom:1px solid #ddd;display:flex;gap:10px;align-items:center}
+    header a, header button{font:inherit}
+    .wrap{display:grid;grid-template-columns:360px 1fr;gap:12px;padding:12px}
+    .card{background:#fff;border:1px solid #ddd;border-radius:14px;padding:12px;box-shadow:0 4px 18px rgba(0,0,0,.06)}
+    .muted{color:#666;font-size:13px}
+    .tables{max-height:70vh;overflow:auto}
+    .tbl{border:1px solid #eee;border-radius:12px;padding:10px;margin:10px 0}
+    .tbl h4{margin:0 0 8px 0;font-size:14px}
+    .cols{display:flex;flex-wrap:wrap;gap:8px}
+    label{display:inline-flex;gap:6px;align-items:center;font-size:13px}
+    input[type="text"], select{width:100%;padding:10px;border:1px solid #ddd;border-radius:10px}
+    button{padding:10px 14px;border:0;border-radius:10px;background:#111;color:#fff;cursor:pointer}
+    button.secondary{background:#666}
+    table{width:100%;border-collapse:collapse}
+    th,td{border-bottom:1px solid #eee;padding:8px;text-align:left;font-size:13px;vertical-align:top}
+    .scroll{max-height:70vh;overflow:auto}
+    .row{display:grid;gap:10px}
+  </style>
+</head>
+<body>
+  <header>
+    <strong>Visor SQLite</strong>
+    <span class="muted">BDs cargadas: {{ db_count }}</span>
+    <a href="/" style="margin-left:auto">Subir otras</a>
+    <form action="/api/clear/" method="post" style="margin:0">
+      {% csrf_token %}
+      <button class="secondary" type="submit">Limpiar sesión</button>
+    </form>
+  </header>
+
+  <div class="wrap">
+    <div class="card">
+      <div class="row">
+        <div>
+          <div class="muted">1) Elige BD</div>
+          <select id="dbSelect"></select>
+        </div>
+        <div>
+          <div class="muted">2) Filtro (LIKE)</div>
+          <input id="filterText" type="text" placeholder="Texto a buscar en columnas seleccionadas" />
+        </div>
+        <div>
+            <button id="runBtn" type="button">Consultar</button>
+            <button id="exportBtn" type="button" class="secondary" style="margin-left:8px">Exportar Excel</button>
+        </div>
+      </div>
+
+      <hr style="border:0;border-top:1px solid #eee;margin:12px 0" />
+
+      <div class="tables" id="schemaBox"></div>
+    </div>
+
+    <div class="card">
+      <div class="muted">Resultados (máx 500 filas en pantalla)</div>
+      <div class="scroll" id="results"></div>
+    </div>
+  </div>
+
+<script>
+let SCHEMA = null;
+
+function el(id){ return document.getElementById(id); }
+
+async function loadSchema(){
+  const res = await fetch("/api/schema/");
+  const data = await res.json();
+  if(!data.ok){
+    el("schemaBox").innerHTML = `<p class="muted">${data.error}</p>`;
+    return;
+  }
+  SCHEMA = data.dbs;
+
+  // llenar select de BD
+  const sel = el("dbSelect");
+  sel.innerHTML = "";
+  for(const db of SCHEMA){
+    const opt = document.createElement("option");
+    opt.value = db.name;
+    opt.textContent = db.name + (db.error ? " (error)" : "");
+    sel.appendChild(opt);
+  }
+  renderSchema();
+}
+
+function renderSchema(){
+  const dbName = el("dbSelect").value;
+  const db = SCHEMA.find(x => x.name === dbName);
+  const box = el("schemaBox");
+  if(!db || db.error){
+    box.innerHTML = `<p class="muted">No se pudo leer schema de esta BD.</p>`;
+    return;
+  }
+  const schema = db.schema;
+
+  let html = "";
+  for(const [tbl, cols] of Object.entries(schema)){
+    html += `<div class="tbl">
+      <h4>
+        <label style="font-weight:700">
+          <input type="radio" name="tableRadio" value="${tbl}">
+          ${tbl}
+        </label>
+      </h4>
+      <div class="cols">
+        ${cols.map(c => `
+          <label>
+            <input type="checkbox" data-col="${c}" data-table="${tbl}">
+            ${c}
+          </label>
+        `).join("")}
+      </div>
+    </div>`;
+  }
+  box.innerHTML = html;
+
+  // selecciona primera tabla por defecto
+    const firstRadio = box.querySelector('input[type="radio"][name="tableRadio"]');
+    if(firstRadio){
+        firstRadio.checked = true;
+        selectAllColumnsForTable(firstRadio.value);
+    }
+}
+function getSelected(){
+  const db_name = el("dbSelect").value;
+  const tableRadio = document.querySelector('input[name="tableRadio"]:checked');
+  const table = tableRadio ? tableRadio.value : "";
+
+  const checks = document.querySelectorAll(`input[type="checkbox"][data-table="${table}"]:checked`);
+  const cols = Array.from(checks).map(x => x.getAttribute("data-col"));
+
+  const filter = el("filterText").value.trim();
+
+  return {db_name, table, cols, filter};
+}
+
+async function runQuery(){
+  const s = getSelected();
+  if(!s.table || s.cols.length === 0){
+    el("results").innerHTML = `<p class="muted">Selecciona una tabla y al menos una columna.</p>`;
+    return;
+  }
+
+  const fd = new FormData();
+  fd.append("db_name", s.db_name);
+  fd.append("table", s.table);
+  for(const c of s.cols) fd.append("cols", c);
+  fd.append("filter", s.filter);
+
+  // CSRF
+  fd.append("csrfmiddlewaretoken", getCookie("csrftoken"));
+
+  const res = await fetch("/api/query/", {method:"POST", body: fd});
+  const data = await res.json();
+
+  if(!data.ok){
+    el("results").innerHTML = `<p class="muted">${data.error}</p>`;
+    return;
+  }
+
+  const headers = data.headers;
+  const rows = data.rows;
+
+  let html = "<table><thead><tr>";
+  for(const h of headers) html += `<th>${escapeHtml(h)}</th>`;
+  html += "</tr></thead><tbody>";
+  for(const r of rows){
+    html += "<tr>";
+    for(const cell of r) html += `<td>${escapeHtml(String(cell ?? ""))}</td>`;
+    html += "</tr>";
+  }
+  html += "</tbody></table>";
+  el("results").innerHTML = html;
+}
+
+function exportExcel(){
+  const s = getSelected();
+  if(!s.table || s.cols.length === 0){
+    alert("Selecciona tabla y columnas antes de exportar.");
+    return;
+  }
+  const form = document.createElement("form");
+  form.method = "POST";
+  form.action = "/api/export/";
+
+  const add = (k,v) => {
+    const i = document.createElement("input");
+    i.type = "hidden"; i.name = k; i.value = v;
+    form.appendChild(i);
+  };
+
+  add("csrfmiddlewaretoken", getCookie("csrftoken"));
+  add("db_name", s.db_name);
+  add("table", s.table);
+  for(const c of s.cols) add("cols", c);
+  add("filter", s.filter);
+
+  document.body.appendChild(form);
+  form.submit();
+  form.remove();
+}
+
+// Helpers
+function escapeHtml(s){
+  return s.replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#039;");
+}
+function getCookie(name) {
+  const v = `; ${document.cookie}`;
+  const parts = v.split(`; ${name}=`);
+  if (parts.length === 2) return parts.pop().split(";").shift();
+  return "";
+}
+function selectAllColumnsForTable(table){
+  const checks = document.querySelectorAll(`input[type="checkbox"][data-table="${table}"]`);
+  checks.forEach(ch => ch.checked = true);
+}
+
+function unselectAllColumnsForTable(table){
+  const checks = document.querySelectorAll(`input[type="checkbox"][data-table="${table}"]`);
+  checks.forEach(ch => ch.checked = false);
+}
+let tableAllSelected = {}; // { "SCLG": true/false }
+
+function areAllChecked(table){
+  const checks = document.querySelectorAll(`input[type="checkbox"][data-table="${table}"]`);
+  if(checks.length === 0) return false;
+  return Array.from(checks).every(ch => ch.checked);
+}
+
+document.addEventListener("click", (e) => {
+  const radio = e.target && e.target.matches('input[name="tableRadio"]') ? e.target : null;
+  if(!radio) return;
+
+  const table = radio.value;
+
+  // Si ya está todo seleccionado, al clickear de nuevo -> desmarcar todo
+  if(areAllChecked(table) || tableAllSelected[table] === true){
+    unselectAllColumnsForTable(table);
+    tableAllSelected[table] = false;
+  } else {
+    selectAllColumnsForTable(table);
+    tableAllSelected[table] = true;
+  }
+});
+
+el("dbSelect").addEventListener("change", renderSchema);
+el("runBtn").addEventListener("click", runQuery);
+el("exportBtn").addEventListener("click", exportExcel);
+
+loadSchema();
+</script>
+
+</body>
+</html>

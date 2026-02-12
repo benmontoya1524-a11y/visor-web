@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Login - Visor SQLite</title>
+  <style>
+    body{font-family:system-ui,Arial;margin:0;display:grid;place-items:center;min-height:100vh;background:#f6f6f6}
+    .card{background:#fff;border:1px solid #ddd;border-radius:14px;padding:18px;max-width:420px;width:92%;box-shadow:0 4px 18px rgba(0,0,0,.06)}
+    input,button{font:inherit}
+    input{width:100%;padding:10px;border:1px solid #ddd;border-radius:10px}
+    button{padding:10px 14px;border:0;border-radius:10px;background:#111;color:#fff;cursor:pointer;width:100%}
+    .muted{color:#666;font-size:13px}
+    .err{color:#b00020;font-size:13px;margin:8px 0}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>Visor SQLite</h2>
+    <p class="muted">Acceso interno</p>
+
+    {% if form.errors %}
+      <div class="err">Usuario o contraseña incorrectos.</div>
+    {% endif %}
+
+    <form method="post">
+      {% csrf_token %}
+      <label class="muted">Usuario</label>
+      {{ form.username }}
+      <div style="height:10px"></div>
+
+      <label class="muted">Contraseña</label>
+      {{ form.password }}
+      <div style="height:14px"></div>
+
+      <button type="submit">Entrar</button>
+
+      {% if next %}
+        <input type="hidden" name="next" value="{{ next }}">
+      {% endif %}
+    </form>
+  </div>
+</body>
+</html>

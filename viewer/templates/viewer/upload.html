@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Subir BDs - Visor SQLite</title>
+  <style>
+    body{font-family:system-ui,Arial;margin:0;background:#f6f6f6;display:grid;place-items:center;min-height:100vh}
+    .card{background:#fff;border:1px solid #ddd;border-radius:14px;padding:18px;max-width:520px;width:92%;box-shadow:0 4px 18px rgba(0,0,0,.06)}
+    input,button{font:inherit}
+    button{padding:10px 14px;border:0;border-radius:10px;background:#111;color:#fff;cursor:pointer}
+    .muted{color:#666;font-size:14px}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>Subir bases SQLite</h2>
+    <p class="muted">Selecciona uno o varios archivos (.db, .sqlite, .sqlite3, .sa2s, .si1s)</p>
+
+    <form action="/upload/" method="post" enctype="multipart/form-data">
+      {% csrf_token %}
+      <input type="file" name="dbfiles" multiple required />
+      <div style="height:12px"></div>
+      <button type="submit">Subir y abrir visor</button>
+    </form>
+  </div>
+</body>
+</html>
